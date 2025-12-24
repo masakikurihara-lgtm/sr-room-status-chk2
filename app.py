@@ -48,12 +48,11 @@ def get_room_profile(room_id):
         return None
 
 def display_multiple_room_status(all_room_data):
-    """取得した複数のルームデータを一覧表示する"""
+    """取得した複数のルームデータを一覧表示し、ダウンロード機能を提供する"""
 
-    # 取得時刻表示
-    st.caption(
-        f"（取得時刻: {datetime.datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')} 現在）"
-    )
+    # 現在時刻の取得
+    now_str = datetime.datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')
+    st.caption(f"（取得時刻: {now_str} 現在）")
     
     # --- カスタムCSS ---
     custom_styles = """
@@ -104,7 +103,10 @@ def display_multiple_room_status(all_room_data):
     """
     st.markdown(custom_styles, unsafe_allow_html=True)
 
-    st.markdown("<h1 style='font-size:22px; text-align:left; color:#1f2937; padding: 15px 0px 5px 0px;'>📊 ルーム基本情報一覧</h1>", unsafe_allow_html=True)
+    headers = [
+        "ルーム名", "ルームレベル", "現在のSHOWランク", "上位ランクまでのスコア", 
+        "下位ランクまでのスコア", "フォロワー数", "まいにち配信", "ジャンル", "公式 or フリー"
+    ]
 
     # 数値フォーマットと判定ロジック
     def is_within_30000(value):
@@ -121,18 +123,16 @@ def display_multiple_room_status(all_room_data):
         except (ValueError, TypeError):
             return str(value)
 
-    headers = [
-        "ルーム名", "ルームレベル", "現在のSHOWランク", "上位ランクまでのスコア", 
-        "下位ランクまでのスコア", "フォロワー数", "まいにち配信", "ジャンル", "公式 or フリー"
-    ]
-
-    # テーブルの各行を作成
+    # 表示用HTML行とCSV用データリストを作成
     rows_html = []
+    csv_data = []
+
     for room_id, profile_data in all_room_data.items():
         if not profile_data:
             rows_html.append(f"<tr><td>ID:{room_id}</td><td colspan='8'>データ取得失敗</td></tr>")
             continue
 
+        # データの安全な抽出
         room_name = _safe_get(profile_data, ["room_name"], "取得失敗")
         room_level = _safe_get(profile_data, ["room_level"], "-")
         show_rank = _safe_get(profile_data, ["show_rank_subdivided"], "-")
@@ -147,28 +147,50 @@ def display_multiple_room_status(all_room_data):
         genre_name = GENRE_MAP.get(genre_id, f"その他 ({genre_id})" if genre_id else "-")
         room_url = f"https://www.showroom-live.com/room/profile?room_id={room_id}"
         
-        # セルデータの構築
+        # --- HTML表示用の処理 ---
         room_name_cell = f'<a href="{room_url}" target="_blank" class="room-link">{room_name}</a>'
-        
-        values = [
+        display_values = [
             room_name_cell, format_value(room_level), show_rank, format_value(next_score), 
             format_value(prev_score), format_value(follower_num), format_value(live_continuous_days), 
             genre_name, official_status
         ]
 
         td_html = []
-        for i, value in enumerate(values):
+        for i, value in enumerate(display_values):
             header_name = headers[i]
             css_class = ""
             if header_name == "上位ランクまでのスコア" and is_within_30000(next_score):
                 css_class = "basic-info-highlight-upper"
             elif header_name == "下位ランクまでのスコア" and is_within_30000(prev_score):
                 css_class = "basic-info-highlight-lower"
-            
             td_html.append(f'<td class="{css_class}">{value}</td>')
         
         rows_html.append(f"<tr>{''.join(td_html)}</tr>")
 
+        # --- CSV用の処理（HTMLタグを含まない純粋なデータ） ---
+        csv_data.append([
+            room_name, room_level, show_rank, next_score, prev_score, 
+            follower_num, live_continuous_days, genre_name, official_status
+        ])
+
+    # タイトルとダウンロードボタンのレイアウト
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("<h1 style='font-size:22px; text-align:left; color:#1f2937; padding: 15px 0px 5px 0px;'>📊 ルーム基本情報一覧</h1>", unsafe_allow_html=True)
+    
+    with col2:
+        # ダウンロードボタンの設置
+        if csv_data:
+            df_download = pd.DataFrame(csv_data, columns=headers)
+            csv = df_download.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 CSVをダウンロード",
+                data=csv,
+                file_name=f"showroom_status_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+            )
+
+    # テーブルの表示
     html_content = f"""
     <div class="basic-info-table-wrapper">
         <table class="basic-info-table">
@@ -218,7 +240,6 @@ if st.session_state.authenticated:
     st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール</h1>", unsafe_allow_html=True)
     st.markdown("##### 🔎 ルームIDの入力")
 
-    # 複数入力可能なテキストエリア形式（または広めのテキスト入力）に変更
     input_text = st.text_area(
         "表示したいルームIDを入力してください（複数ある場合はカンマ、スペース、改行で区切ってください）:",
         placeholder="例: 123456, 789012",
@@ -238,7 +259,6 @@ if st.session_state.authenticated:
             st.warning("ルームIDを入力してください。")
             
     if st.session_state.show_status and st.session_state.input_room_ids:
-        # 入力文字列から数字のIDのみを抽出してリスト化
         id_list = [rid.strip() for rid in re.split(r'[,\s\n]+', st.session_state.input_room_ids) if rid.strip().isdigit()]
         
         if not id_list:
