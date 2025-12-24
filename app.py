@@ -9,7 +9,7 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 
 # Streamlit の初期設定
 st.set_page_config(
-    page_title="SHOWROOM ルームステータス確認ツール",
+    page_title="SHOWROOM ルームステータス確認ツール（簡易一括版）",
     layout="wide"
 )
 
@@ -204,7 +204,7 @@ def display_multiple_room_status(all_room_data):
     </div>
     """
     st.markdown(html_content, unsafe_allow_html=True)
-    st.caption("※ルーム名をクリックするとSHOWROOMのプロフィールページが開きます。")
+    # st.caption("※ルーム名をクリックするとSHOWROOMのプロフィールページが開きます。")
 
 # --- メインロジック ---
 if 'authenticated' not in st.session_state:
@@ -215,7 +215,7 @@ if 'input_room_ids' not in st.session_state:
     st.session_state.input_room_ids = ""
 
 if not st.session_state.authenticated:
-    st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール（簡易一括版）</h1>", unsafe_allow_html=True)
     st.markdown("##### 🔑 認証コードを入力してください")
     input_auth_code = st.text_input("認証コードを入力してください:", placeholder="認証コード", type="password", key="room_id_input_auth")
     
@@ -237,7 +237,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 if st.session_state.authenticated:
-    st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール（簡易一括版）</h1>", unsafe_allow_html=True)
     st.markdown("##### 🔎 ルームIDの入力")
 
     input_text = st.text_area(
