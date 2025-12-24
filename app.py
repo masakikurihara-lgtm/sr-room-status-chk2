@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import io
 import datetime
+import re
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -46,46 +47,17 @@ def get_room_profile(room_id):
     except requests.exceptions.RequestException:
         return None
 
-def display_room_status(profile_data, input_room_id):
-    """取得したルームプロフィールデータを表示する（ルーム基本情報のみ）"""
+def display_multiple_room_status(all_room_data):
+    """取得した複数のルームデータを一覧表示する"""
 
     # 取得時刻表示
     st.caption(
         f"（取得時刻: {datetime.datetime.now(JST).strftime('%Y/%m/%d %H:%M:%S')} 現在）"
     )
     
-    # データを安全に取得
-    room_name = _safe_get(profile_data, ["room_name"], "取得失敗")
-    room_level = _safe_get(profile_data, ["room_level"], "-")
-    show_rank = _safe_get(profile_data, ["show_rank_subdivided"], "-")
-    next_score = _safe_get(profile_data, ["next_score"], "-")
-    prev_score = _safe_get(profile_data, ["prev_score"], "-")
-    follower_num = _safe_get(profile_data, ["follower_num"], "-")
-    live_continuous_days = _safe_get(profile_data, ["live_continuous_days"], "-")
-    is_official = _safe_get(profile_data, ["is_official"], None)
-    genre_id = _safe_get(profile_data, ["genre_id"], None)
-
-    official_status = "公式" if is_official is True else "フリー" if is_official is False else "-"
-    genre_name = GENRE_MAP.get(genre_id, f"その他 ({genre_id})" if genre_id else "-")
-    room_url = f"https://www.showroom-live.com/room/profile?room_id={input_room_id}"
-    
-    # --- カスタムCSS（基本情報テーブル用を維持） ---
+    # --- カスタムCSS ---
     custom_styles = """
     <style>
-    .room-title-container {
-        padding: 15px 20px;
-        margin-bottom: 20px;
-        border-radius: 8px;
-        background-color: #f0f2f6; 
-        border: 1px solid #e6e6e6;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        display: flex;
-        align-items: center;
-    }
-    .room-title-container a {
-        text-decoration: none; 
-        color: #1c1c1c; 
-    }
     .basic-info-table-wrapper {
         width: 100%;
         margin: 0 auto;
@@ -102,18 +74,15 @@ def display_room_status(profile_data, input_room_id):
         color: #1a237e; 
         font-weight: bold;
         padding: 8px 10px; 
-        border-top: 1px solid #c5cae9; 
-        border-bottom: 1px solid #c5cae9; 
+        border: 1px solid #c5cae9; 
         white-space: nowrap;
-        width: 12.5%;
     }
     .basic-info-table td {
         text-align: center !important; 
-        padding: 6px 10px; 
+        padding: 8px 10px; 
         line-height: 1.4;
-        border-bottom: 1px solid #f0f0f0;
+        border: 1px solid #f0f0f0;
         white-space: nowrap;
-        width: 12.5%;
         font-weight: 600;
     }
     .basic-info-table tbody tr:hover {
@@ -127,20 +96,15 @@ def display_room_status(profile_data, input_room_id):
         background-color: #fff9c4 !important;
         color: #795548;
     }
+    .room-link {
+        text-decoration: underline;
+        color: #1f2937;
+    }
     </style>
     """
     st.markdown(custom_styles, unsafe_allow_html=True)
 
-    # タイトル表示
-    st.markdown(
-        f'<div class="room-title-container">'
-        f'<h1 style="font-size:25px; text-align:left; color:#1f2937;"><a href="{room_url}" target="_blank"><u>{room_name} ({input_room_id})</u></a> のルームステータス</h1>'
-        f'</div>', 
-        unsafe_allow_html=True
-    ) 
-    
-    st.markdown("<div style='margin-top: 16px;'></div>", unsafe_allow_html=True)
-    st.markdown("<h1 style='font-size:22px; text-align:left; color:#1f2937; padding: 5px 0px 0px 0px;'>📊 ルーム基本情報</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:22px; text-align:left; color:#1f2937; padding: 15px 0px 5px 0px;'>📊 ルーム基本情報一覧</h1>", unsafe_allow_html=True)
 
     # 数値フォーマットと判定ロジック
     def is_within_30000(value):
@@ -158,24 +122,52 @@ def display_room_status(profile_data, input_room_id):
             return str(value)
 
     headers = [
-        "ルームレベル", "現在のSHOWランク", "上位ランクまでのスコア", "下位ランクまでのスコア",
-        "フォロワー数", "まいにち配信", "ジャンル", "公式 or フリー"
+        "ルーム名", "ルームレベル", "現在のSHOWランク", "上位ランクまでのスコア", 
+        "下位ランクまでのスコア", "フォロワー数", "まいにち配信", "ジャンル", "公式 or フリー"
     ]
 
-    values = [
-        format_value(room_level), show_rank, format_value(next_score), format_value(prev_score),
-        format_value(follower_num), format_value(live_continuous_days), genre_name, official_status
-    ]
-    
-    # HTMLテーブル構築
-    td_html = []
-    for header, value in zip(headers, values):
-        css_class = ""
-        if header == "上位ランクまでのスコア" and is_within_30000(next_score):
-            css_class = "basic-info-highlight-upper"
-        if header == "下位ランクまでのスコア" and is_within_30000(prev_score):
-            css_class = "basic-info-highlight-lower"
-        td_html.append(f'<td class="{css_class}">{value}</td>')
+    # テーブルの各行を作成
+    rows_html = []
+    for room_id, profile_data in all_room_data.items():
+        if not profile_data:
+            rows_html.append(f"<tr><td>ID:{room_id}</td><td colspan='8'>データ取得失敗</td></tr>")
+            continue
+
+        room_name = _safe_get(profile_data, ["room_name"], "取得失敗")
+        room_level = _safe_get(profile_data, ["room_level"], "-")
+        show_rank = _safe_get(profile_data, ["show_rank_subdivided"], "-")
+        next_score = _safe_get(profile_data, ["next_score"], "-")
+        prev_score = _safe_get(profile_data, ["prev_score"], "-")
+        follower_num = _safe_get(profile_data, ["follower_num"], "-")
+        live_continuous_days = _safe_get(profile_data, ["live_continuous_days"], "-")
+        is_official = _safe_get(profile_data, ["is_official"], None)
+        genre_id = _safe_get(profile_data, ["genre_id"], None)
+
+        official_status = "公式" if is_official is True else "フリー" if is_official is False else "-"
+        genre_name = GENRE_MAP.get(genre_id, f"その他 ({genre_id})" if genre_id else "-")
+        room_url = f"https://www.showroom-live.com/room/profile?room_id={room_id}"
+        
+        # セルデータの構築
+        room_name_cell = f'<a href="{room_url}" target="_blank" class="room-link">{room_name}</a>'
+        
+        values = [
+            room_name_cell, format_value(room_level), show_rank, format_value(next_score), 
+            format_value(prev_score), format_value(follower_num), format_value(live_continuous_days), 
+            genre_name, official_status
+        ]
+
+        td_html = []
+        for i, value in enumerate(values):
+            header_name = headers[i]
+            css_class = ""
+            if header_name == "上位ランクまでのスコア" and is_within_30000(next_score):
+                css_class = "basic-info-highlight-upper"
+            elif header_name == "下位ランクまでのスコア" and is_within_30000(prev_score):
+                css_class = "basic-info-highlight-lower"
+            
+            td_html.append(f'<td class="{css_class}">{value}</td>')
+        
+        rows_html.append(f"<tr>{''.join(td_html)}</tr>")
 
     html_content = f"""
     <div class="basic-info-table-wrapper">
@@ -184,21 +176,21 @@ def display_room_status(profile_data, input_room_id):
                 <tr>{"".join(f'<th>{h}</th>' for h in headers)}</tr>
             </thead>
             <tbody>
-                <tr>{"".join(td_html)}</tr>
+                {"".join(rows_html)}
             </tbody>
         </table>
     </div>
     """
     st.markdown(html_content, unsafe_allow_html=True)
-    st.caption("※取得できないデータなどはハイフン表示となる場合があります。")
+    st.caption("※ルーム名をクリックするとSHOWROOMのプロフィールページが開きます。")
 
 # --- メインロジック ---
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'show_status' not in st.session_state:
     st.session_state.show_status = False
-if 'input_room_id' not in st.session_state:
-    st.session_state.input_room_id = ""
+if 'input_room_ids' not in st.session_state:
+    st.session_state.input_room_ids = ""
 
 if not st.session_state.authenticated:
     st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール</h1>", unsafe_allow_html=True)
@@ -226,29 +218,35 @@ if st.session_state.authenticated:
     st.markdown("<h1 style='font-size:28px; text-align:left; color:#1f2937;'>💖 SHOWROOM ルームステータス確認ツール</h1>", unsafe_allow_html=True)
     st.markdown("##### 🔎 ルームIDの入力")
 
-    input_room_id_current = st.text_input(
-        "表示したいルームIDを入力してください:",
-        placeholder="例: 123456",
-        key="room_id_input_main",
-        value=st.session_state.input_room_id
+    # 複数入力可能なテキストエリア形式（または広めのテキスト入力）に変更
+    input_text = st.text_area(
+        "表示したいルームIDを入力してください（複数ある場合はカンマ、スペース、改行で区切ってください）:",
+        placeholder="例: 123456, 789012",
+        key="room_ids_input_area",
+        value=st.session_state.input_room_ids,
+        help="複数のIDをまとめて入力して一括比較できます。"
     ).strip()
     
-    if input_room_id_current != st.session_state.input_room_id:
-        st.session_state.input_room_id = input_room_id_current
+    if input_text != st.session_state.input_room_ids:
+        st.session_state.input_room_ids = input_text
         st.session_state.show_status = False
         
     if st.button("ルームステータスを表示"):
-        if st.session_state.input_room_id and st.session_state.input_room_id.isdigit():
+        if st.session_state.input_room_ids:
             st.session_state.show_status = True
-        elif st.session_state.input_room_id:
-            st.error("ルームIDは数字で入力してください。")
         else:
             st.warning("ルームIDを入力してください。")
             
-    if st.session_state.show_status and st.session_state.input_room_id:
-        with st.spinner(f"ルームID {st.session_state.input_room_id} の情報を取得中..."):
-            room_profile = get_room_profile(st.session_state.input_room_id)
-        if room_profile:
-            display_room_status(room_profile, st.session_state.input_room_id)
+    if st.session_state.show_status and st.session_state.input_room_ids:
+        # 入力文字列から数字のIDのみを抽出してリスト化
+        id_list = [rid.strip() for rid in re.split(r'[,\s\n]+', st.session_state.input_room_ids) if rid.strip().isdigit()]
+        
+        if not id_list:
+            st.error("有効なルームID（数字）が見つかりませんでした。")
         else:
-            st.error(f"ルームID {st.session_state.input_room_id} の情報を取得できませんでした。")
+            all_results = {}
+            with st.spinner(f"{len(id_list)} 件のルーム情報を取得中..."):
+                for rid in id_list:
+                    all_results[rid] = get_room_profile(rid)
+            
+            display_multiple_room_status(all_results)
